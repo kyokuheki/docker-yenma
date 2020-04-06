@@ -1,0 +1,60 @@
+FROM buildpack-deps:latest as builder
+LABEL maintainer Kenzo Okuda <kyokuheki@gmail.comt>
+ENV LANG="en_US.UTF-8"
+
+RUN set -x \
+ && apt-get update && apt-get install -y --no-install-recommends \
+    libldns-dev \
+    libmilter-dev \
+    libssl-dev \
+    make
+
+#ADD https://github.com/iij/yenma/archive/master.tar.gz /yenma
+
+RUN set -x \
+ && curl -sSL https://github.com/iij/yenma/archive/master.tar.gz | tar zxvf - -C / \
+ && cd /yenma-master \
+ && ./configure \
+ && make install
+
+FROM ubuntu:rolling
+LABEL maintainer Kenzo Okuda <kyokuheki@gmail.com>
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    DEBIAN_FRONTEND=noninteractive
+
+COPY --from=builder /usr/local/bin/spfeval /usr/local/bin/spfeval
+COPY --from=builder /usr/local/libexec/yenma /usr/local/libexec/yenma
+COPY --from=builder /usr/local/lib/libsauth.a /usr/local/lib/libsauth.la /usr/local/lib/libsauth.so.0.0.0 /usr/local/lib/
+COPY --from=builder /usr/local/etc/yenma.conf /etc/yenma/yenma.conf
+
+RUN set -x \
+ && ln -svf libsauth.so.0.0.0 /usr/local/lib/libsauth.so.0 \
+ && ln -svf libsauth.so.0.0.0 /usr/local/lib/libsauth.so
+
+RUN set -x \
+ && apt-get update && apt-get install -y --no-install-recommends \
+    libldns2 \
+    libmilter1.0.1 \
+    libssl1.1 \
+    netcat-openbsd \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /etc/yenma
+
+COPY monitrc /etc/monitrc
+ADD https://publicsuffix.org/list/public_suffix_list.dat /etc/public_suffix
+
+RUN set -x \
+ && chmod 600 /etc/monitrc
+
+EXPOSE 10025/tcp
+VOLUME ["/etc/yenma"]
+
+CMD set -x; \
+    ln -svf /var/run/dev/log /dev/log; \
+    /usr/local/libexec/yenma -c /etc/yenma/yenma.conf \
+ && monit -vvIB
+
+HEALTHCHECK --interval=60s --timeout=5s \
+  CMD monit -B status yenma | awk '/^  status/{print $2;exit ($2!="OK")}' || exit 1

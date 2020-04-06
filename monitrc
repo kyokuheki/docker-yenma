@@ -1,0 +1,38 @@
+# check services at 5 seconds intervals
+set daemon  5
+
+set pidfile /var/run/monit.pid
+set statefile /var/.monit.state
+
+set httpd port 2812 and
+    use address localhost  # only accept connection from localhost (drop if you use M/Monit)
+    allow localhost        # allow localhost to connect to the server and
+    allow admin:monit      # require user 'admin' with password 'monit'
+    #with ssl {            # enable SSL/TLS and set path to server certificate
+    #    pemfile: /etc/ssl/certs/monit.pem
+    #}
+
+set limits {
+    programOutput:     512 B,      # check program's output truncate limit
+    sendExpectBuffer:  512 KB,      # limit for send/expect protocol test
+    fileContentBuffer: 512 B,      # limit for file content test
+    httpContentBuffer: 1 MB,       # limit for HTTP content test
+    networkTimeout:    5 seconds   # timeout for network I/O
+    programTimeout:    300 seconds # timeout for check program
+    stopTimeout:       30 seconds  # timeout for service stop
+    startTimeout:      30 seconds  # timeout for service start
+    restartTimeout:    30 seconds  # timeout for service restart
+}
+
+check process yenma with pidfile /var/run/yenma.pid
+  start program = "/usr/local/libexec/yenma -c /etc/yenma/yenma.conf" with timeout 60 seconds
+  stop program  = "/bin/sh -c '/bin/echo graceful | /usr/bin/nc 0.0.0.0 20025'"
+  if failed port 10025 ipv4 type tcp with timeout 15 seconds then restart
+  if failed
+    port 20025 ipv4 type tcp and
+    #send   "SHOW-COUNTER json\r\n"
+    #expect "^\{.*"
+    send   "QUIT\r\n"
+    expect "^200.*"
+  then restart
+  group server
